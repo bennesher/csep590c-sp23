@@ -7,16 +7,10 @@ namespace DLL.Connection
     /// </summary>
     public class DeviceConnection
     {
-        /// <summary>
-        ///     A <tt>Listener</tt> handles incoming packets from the device
-        /// </summary>
-        /// <param name="code">The command code from the device</param>
-        /// <param name="data">Additional data in the packet, if any</param>
-        public delegate void Listener(byte code, byte[]? data);
-
         private readonly string port;
         private Watchdog? _watchdog;
         private SerialPort? serialPort;
+        private PacketDispatcher packetDispatcher = new PacketDispatcher();
 
         /// <summary>
         ///     Create a connection to the INS over the specified port
@@ -53,7 +47,7 @@ namespace DLL.Connection
         /// </summary>
         /// <param name="opCode">The code to send</param>
         /// <param name="data">Additional data for the command</param>
-        public void Write(byte opCode, byte[]? data)
+        public Task Write(byte opCode, byte[]? data)
         {
 
         }
@@ -72,9 +66,9 @@ namespace DLL.Connection
         ///     If <tt>true</tt>, the listener is deregistered immediately 
         ///     prior to being invoked
         /// </param>
-        public void Listen(byte opCode, Listener listener, bool oneShot = false)
+        public void Listen(byte opCode, PacketListener listener, bool oneShot = false)
         {
-
+            packetDispatcher.Register(opCode, listener, oneShot);
         }
     }
 }
