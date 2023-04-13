@@ -38,11 +38,18 @@ namespace App
         {
             DeviceConnection connection = new(port);
             if (connection.Open()) {
+                connection.ConnectionFailed += OnConnectionFailed;
                 Console.WriteLine("\nConnection established! Press any key to terminate.\n");
                 Console.ReadKey();
                 Console.WriteLine("\nTerminating the application...");
                 connection.Close();
             }
+        }
+
+        private static void OnConnectionFailed(object? sender, EventArgs e)
+        {
+            Console.WriteLine("Connection failed - Terminating...");
+            Environment.Exit(1);
         }
     }
 }

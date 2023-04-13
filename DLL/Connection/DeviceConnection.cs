@@ -19,6 +19,7 @@ namespace DLL.Connection
         private PacketDispatcher? _packetDispatcher;
         private PortListener? _portListener;
         private uint _packetCount = 0;
+        private bool _connected = false;
 
         /// <summary>
         ///     Create a connection to the INS over the specified port
@@ -31,8 +32,15 @@ namespace DLL.Connection
         /// <param name="port">The port over which to communicate</param>
         public DeviceConnection(string port)
         {
-            this._port = port;
+            _port = port;
         }
+
+        /// <summary>
+        ///     Event raised when connection health is irredeemably failed. 
+        ///     This allows the listener to attempt to establish a new connection,
+        ///     escalate the alert, or simply fail gracefully.
+        /// </summary>
+        public event EventHandler<EventArgs> ConnectionFailed;
 
         /// <summary>
         ///     Opens the port and establishes a communication sesion
@@ -55,8 +63,18 @@ namespace DLL.Connection
             {
                 // Now that we have our connection, keep it alive
                 _watchdog = new Watchdog(this);
+                _connected = true;
             }
             return opened;
+        }
+
+        /// <summary>
+        ///     Once opened, a connection will remain connected until it fails 
+        ///     or is closed.
+        /// </summary>
+        public bool IsConnected
+        {
+            get => _connected;
         }
 
         /// <summary>
@@ -75,6 +93,12 @@ namespace DLL.Connection
                 {
                     Thread.Sleep(WRITE_TIMEOUT);
                 }
+            }
+
+            if (!opened)
+            {
+                _connected = false;
+                ConnectionFailed?.Invoke(this, EventArgs.Empty);
             }
 
             return opened;
@@ -110,6 +134,7 @@ namespace DLL.Connection
 
                 _serialPort.Close();
                 _serialPort = null;
+                _connected = false;
             }
         }
 
