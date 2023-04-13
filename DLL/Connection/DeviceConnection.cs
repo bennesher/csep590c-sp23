@@ -10,6 +10,7 @@ namespace DLL.Connection
     {
         private const int WRITE_TIMEOUT = 500;
         private const int READ_TIMEOUT = 500;
+        private const int CONNECTION_ATTEMPTS = 10;
 
         private readonly object _writeLock = new();
         private readonly string _port;
@@ -49,16 +50,7 @@ namespace DLL.Connection
             _portListener = new(_packetDispatcher, _serialPort);
 
             // Open the connection
-            bool opened = false;
-            int attempts = 0;
-            while (!opened && attempts++ < 10)
-            {
-                opened = TryOpenConnection();
-                if (!opened)
-                {
-                    Thread.Sleep(WRITE_TIMEOUT);
-                }
-            }
+            bool opened = TryConnection();
             if (opened)
             {
                 // Now that we have our connection, keep it alive
@@ -68,10 +60,31 @@ namespace DLL.Connection
         }
 
         /// <summary>
+        ///     Attempt to establish a session with the device, retrying up
+        ///     to <see cref="CONNECTION_ATTEMPTS"/> before giving up.
+        /// </summary>
+        /// <returns><c>true</c> if session has been established</returns>
+        internal bool TryConnection()
+        {
+            bool opened = false;
+            int attempts = 0;
+            while (!opened && attempts++ < CONNECTION_ATTEMPTS)
+            {
+                opened = TryOpenConnection();
+                if (!opened)
+                {
+                    Thread.Sleep(WRITE_TIMEOUT);
+                }
+            }
+
+            return opened;
+        }
+
+        /// <summary>
         ///     Attempt to establish a session with the device
         /// </summary>
         /// <returns><c>true</c> if device acknowledged the new session</returns>
-        internal bool TryOpenConnection() {
+        private bool TryOpenConnection() {
             bool success = Write(0x01);
             if (success)
             {

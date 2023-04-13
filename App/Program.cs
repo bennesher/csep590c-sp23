@@ -18,9 +18,9 @@ namespace App
             }
             while (true)
             {
-                Console.Write("Choice (0-{0}): ", ports.Length);
+                Console.Write("Choice (0-{0}): ", ports.Length-1);
                 var key = Console.ReadKey();
-                Console.WriteLine(key.KeyChar);
+                Console.WriteLine();
                 if (char.IsDigit(key.KeyChar))
                 {
                     int portId = key.KeyChar - '0';
@@ -40,6 +40,7 @@ namespace App
             if (connection.Open()) {
                 Console.WriteLine("\nConnection established! Press any key to terminate.\n");
                 Console.ReadKey();
+                Console.WriteLine("\nTerminating the application...");
                 connection.Close();
             }
         }

@@ -2,6 +2,10 @@
 
 namespace DLL.Connection
 {
+    /// <summary>
+    ///     A continuously running task which handles incoming bytes
+    ///     from the device, and passes the packets on to be dispatched.
+    /// </summary>
     internal class PortListener
     {
         private readonly PacketDispatcher _dispatcher;
@@ -9,6 +13,11 @@ namespace DLL.Connection
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _task;
 
+        /// <summary>
+        ///     Initialize the listener, and start the listening thread
+        /// </summary>
+        /// <param name="dispatcher"></param>
+        /// <param name="serialPort"></param>
         internal PortListener(PacketDispatcher dispatcher, SerialPort serialPort)
         {
             _dispatcher = dispatcher;
@@ -17,12 +26,19 @@ namespace DLL.Connection
             _task = Task.Run(() => Listen(_cts.Token));
         }
 
+        /// <summary>
+        ///     Terminate the listening thread
+        /// </summary>
         internal void Cancel()
         {
             _cts.Cancel();
             _task.Wait(TimeSpan.FromSeconds(1));
         }
 
+        /// <summary>
+        ///     The main listener task
+        /// </summary>
+        /// <param name="cancellationToken">Allows for graceful shutdown</param>
         private void Listen(CancellationToken cancellationToken)
         {
             start_over:
@@ -49,6 +65,7 @@ namespace DLL.Connection
                             return;
                         }
 
+                        // Handle the received byte according to its place in the packet
                         switch (i)
                         {
                             case -1:
@@ -93,6 +110,7 @@ namespace DLL.Connection
                             default:
                                 if (i < limit)
                                 {
+                                    // Additional payload bytes
                                     data[i - 7] = (byte)rcvd;
                                 }
                                 else if (i > limit)
@@ -103,6 +121,7 @@ namespace DLL.Connection
                                 }
                                 else
                                 {
+                                    // We got the checksum byte; does it match?
                                     var checksumCheck = (byte)(checksum % (Byte.MaxValue + 1));
                                     if (rcvd == checksumCheck)
                                     {
