@@ -31,13 +31,13 @@ namespace DLL.Connection
     ///     or blocking work should be fire-and-forget. 
     /// </para>
     /// </remarks>
-    internal class PacketDispatcher: IDisposable
+    internal class PacketDispatcher
     {
         private readonly ConcurrentDictionary<byte, List<RegisteredListener>> _listeners = new();
         private readonly BlockingCollection<Packet> _packets = new(new ConcurrentQueue<Packet>());
         private readonly Task _dispatchTask;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-        private bool disposedValue;
+        private bool canceled;
 
         internal PacketDispatcher()
         {
@@ -125,33 +125,16 @@ namespace DLL.Connection
             }
         }
 
-        protected virtual void Dispose(bool disposing)
+        internal void Cancel()
         {
-            if (!disposedValue)
+            if (!canceled)
             {
                 _cts.Cancel();
                 _dispatchTask.Wait(TimeSpan.FromSeconds(1));
+                _dispatchTask.Dispose();
 
-                if (disposing)
-                {
-                    _dispatchTask.Dispose();
-                }
-
-                disposedValue = true;
+                canceled = true;
             }
-        }
-
-        ~PacketDispatcher()
-        {
-            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-            Dispose(disposing: false);
-        }
-
-        void IDisposable.Dispose()
-        {
-            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-            Dispose(disposing: true);
-            GC.SuppressFinalize(this);
         }
 
         /// <summary>

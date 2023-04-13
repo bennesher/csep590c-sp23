@@ -14,5 +14,10 @@ namespace DLL.Connection
         {
             this.connection = connection;
         }
+
+        internal void Cancel()
+        {
+            throw new NotImplementedException();
+        }
     }
 }
