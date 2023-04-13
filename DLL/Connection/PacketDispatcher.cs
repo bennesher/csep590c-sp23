@@ -104,24 +104,35 @@ namespace DLL.Connection
                 {
                     break;
                 }
-                Packet packet = _packets.Take(token);
-                List<RegisteredListener> listeners = _listeners[packet.opCode];
-                if (listeners != null)
+                try
                 {
-                    for (int i = 0; i < listeners.Count; i++)
+                    Packet packet = _packets.Take(token);
+                    List<RegisteredListener> listeners = _listeners[packet.opCode];
+                    if (listeners != null)
                     {
-                        RegisteredListener listener = listeners[i];
-                        if (listener.listener(packet.id, packet.opCode, packet.data)) 
+                        for (int i = 0; i < listeners.Count; i++)
                         {
-                            if (listener.oneShot)
+                            RegisteredListener listener = listeners[i];
+                            if (listener.listener(packet.id, packet.opCode, packet.data))
                             {
-                                listeners.RemoveAt(i);
+                                if (listener.oneShot)
+                                {
+                                    listeners.RemoveAt(i);
+                                }
+                                goto main_loop;
                             }
-                            goto main_loop;
                         }
                     }
+                    Console.Error.WriteLine("Unhandled packet {0}", packet);
                 }
-                Console.Error.WriteLine("Unhandled packet {0}", packet);
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine(e.ToString());
+                }
             }
         }
 
@@ -131,7 +142,6 @@ namespace DLL.Connection
             {
                 _cts.Cancel();
                 _dispatchTask.Wait(TimeSpan.FromSeconds(1));
-                _dispatchTask.Dispose();
 
                 canceled = true;
             }
