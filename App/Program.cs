@@ -16,17 +16,21 @@ namespace App
             {
                 Console.WriteLine(" {0}: {1}", i++, port);
             }
-            var key = Console.ReadKey();
-            if (char.IsDigit(key.KeyChar))
+            while (true)
             {
-                int portId = key.KeyChar - '0';
-                if (portId >= ports.Length) {
-                    Console.WriteLine("Sorry, invalid port");
-                }
-                else
+                Console.Write("Choice (0-{0}): ", ports.Length);
+                var key = Console.ReadKey();
+                Console.WriteLine(key.KeyChar);
+                if (char.IsDigit(key.KeyChar))
                 {
-                    TestPort(ports[portId]);
+                    int portId = key.KeyChar - '0';
+                    if (portId < ports.Length)
+                    {
+                        TestPort(ports[portId]);
+                        return;
+                    }
                 }
+                Console.WriteLine("Sorry, invalid port");
             }
         }
 
@@ -36,6 +40,7 @@ namespace App
             if (connection.Open()) {
                 Console.WriteLine("\nConnection established! Press any key to terminate.\n");
                 Console.ReadKey();
+                connection.Close();
             }
         }
     }

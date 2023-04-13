@@ -16,6 +16,7 @@ namespace DLL.Connection
         private Watchdog? _watchdog;
         private SerialPort? _serialPort;
         private PacketDispatcher? _packetDispatcher;
+        private PortListener? _portListener;
         private uint _packetCount = 0;
 
         /// <summary>
@@ -45,6 +46,7 @@ namespace DLL.Connection
 
             // Prepare to listen for incoming data
             _packetDispatcher = new PacketDispatcher();
+            _portListener = new(_packetDispatcher, _serialPort);
 
             // Open the connection
             bool opened = false;
@@ -90,6 +92,7 @@ namespace DLL.Connection
             if (_serialPort != null)
             {
                 _watchdog?.Cancel();
+                _portListener?.Cancel();
                 _packetDispatcher?.Cancel();
 
                 _serialPort.Close();
