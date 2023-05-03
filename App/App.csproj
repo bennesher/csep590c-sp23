@@ -5,6 +5,8 @@
     <TargetFramework>net7.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <StartupObject>App.Program</StartupObject>
+    <Title>Device Host</Title>
   </PropertyGroup>
 
   <ItemGroup>

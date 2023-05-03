@@ -40,22 +40,24 @@ namespace App
 
             while (true)
             {
-                Console.WriteLine("s - Start streaming; p - stoP streaming; q - quit. Any other key will repeat this message.");
-                var key = Console.ReadKey();
+                Console.WriteLine("S - Start/Stop streaming; Q - Quit. Any other key will repeat this message.");
+                var key = Console.ReadKey(true);
                 switch (key.KeyChar)
                 {
                     case 's':
                     case 'S':
-                        var status = connection.StartStreaming();
-                        if (status != StreamingStatus.Streaming)
+                        if (connection.IsStreaming)
                         {
-                            Console.WriteLine($"Can't start streaming: {status}");
+                            connection.StopStreaming();
                         }
-                        break;
-
-                    case 'p':
-                    case 'P':
-                        connection.StopStreaming();
+                        else
+                        {
+                            var status = connection.StartStreaming();
+                            if (status != StreamingStatus.Streaming)
+                            {
+                                Console.WriteLine($"Can't start streaming: {status}");
+                            }
+                        }
                         break;
 
                     case 'q':

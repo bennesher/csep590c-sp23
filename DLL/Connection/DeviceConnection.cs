@@ -33,6 +33,11 @@ namespace DeviceInterface.Connection
         }
 
         /// <summary>
+        ///     The file to use for logging streaming data; may be set when connection is constructed
+        /// </summary>
+        public readonly string LogFileName = "DeviceData.csv";
+
+        /// <summary>
         ///     Once opened, a connection will remain connected until it is closed.
         /// </summary>
         public bool IsConnected

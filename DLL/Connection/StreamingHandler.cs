@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using Windows.Storage;
+using Windows.Storage.Streams;
 
 namespace DeviceInterface.Connection
 {
@@ -15,8 +18,11 @@ namespace DeviceInterface.Connection
         private const int CANCEL_RETRY_LIMIT = 3;
 
         private readonly DeviceConnection _connection;
-        private readonly CancellationTokenSource _cts = new();
+        private readonly CancellationTokenSource _ctsReset = new();
+        private readonly CancellationTokenSource _ctsLog = new();
         private bool _initStreamInProgress = false;
+        private readonly BlockingCollection<StreamingDataEventArgs> _datapoints = new(new ConcurrentQueue<StreamingDataEventArgs>());
+        private Task _logWriter;
 
         /// <summary>
         ///     Initialize this handler, which synchronously initializes the session.
@@ -32,6 +38,9 @@ namespace DeviceInterface.Connection
             // Register connection event listener
             connection.StatusChanged += OnConnectionStatusChange;
 
+            // Set up the log file
+            _logWriter = Task.Run(async () => await LogFileWriter(connection.LogFileName));
+
             // Initialize the stream
             InitStream().Wait();
         }
@@ -46,7 +55,7 @@ namespace DeviceInterface.Connection
         {
             bool success = false;
             _initStreamInProgress = true;
-            CancellationToken cancellationToken = _cts.Token;
+            CancellationToken cancellationToken = _ctsReset.Token;
 
             while (!success && !cancellationToken.IsCancellationRequested)
             {
@@ -67,7 +76,7 @@ namespace DeviceInterface.Connection
 
             if (success)
             {
-                _cts.TryReset();
+                _ctsReset.TryReset();
             }
             _initStreamInProgress = false;
         }
@@ -81,7 +90,7 @@ namespace DeviceInterface.Connection
             // Abort any reconnection attempt that may be in progress
             if (_initStreamInProgress)
             {
-                try { _cts.Cancel(); } 
+                try { _ctsReset.Cancel(); } 
                 catch (Exception ex) {
                     Console.Error.WriteLine(ex);
                 }
@@ -92,7 +101,7 @@ namespace DeviceInterface.Connection
             while (retryCount++ < CANCEL_RETRY_LIMIT)
             {
                 DeviceErrorCode? cmdResult = _connection.SendCommand(OpCode.StopStreaming);
-                if (cmdResult != DeviceErrorCode.ERR_BAD_CHECKSUM) {
+                if (cmdResult != DeviceErrorCode.ERR_BAD_CHECKSUM && cmdResult != DeviceErrorCode.ERR_TIMEOUT_EXPIRED) {
                     break;
                 }
             }
@@ -102,6 +111,13 @@ namespace DeviceInterface.Connection
             // Deregister listeners
             _connection.PacketDispatcher.Unregister(PacketType.StreamData, PacketHandler);
             _connection.StatusChanged -= OnConnectionStatusChange;
+
+            // And cancel the log writer
+            try { _ctsLog.Cancel(); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex);
+            }
         }
 
         /// <summary>
@@ -125,6 +141,9 @@ namespace DeviceInterface.Connection
 
                 // Fire the event
                 _connection.RaiseStreamingEvent(evt);
+
+                // And log the packet
+                _datapoints.Add(evt);
             }
 
             // Regardless, we handled it
@@ -155,5 +174,42 @@ namespace DeviceInterface.Connection
                     break;
             }
         }
+
+        /// <summary>
+        ///     Writes streaming datapoints to the log file
+        /// </summary>
+        /// <param name="fileName">The base filename to use</param>
+        private async Task LogFileWriter(string fileName)
+        {
+            CancellationToken cToken = _ctsLog.Token;
+            try
+            {
+                var logFile = await ApplicationData.Current.LocalFolder.CreateFileAsync(fileName, CreationCollisionOption.GenerateUniqueName);
+                Console.WriteLine($"Logging to {logFile.Path}");
+                using StreamWriter logStream = new(logFile.Path);
+                logStream.WriteLine("'Timestamp', 'Value'");
+                while (!cToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var data = _datapoints.Take(cToken);
+                        logStream.WriteLine($"{data.Timestamp}, {data.Data}");
+                    }
+                    catch (OperationCanceledException) 
+                    {
+                        break;
+                    }
+                    catch (Exception e) 
+                    {
+                        Console.Error.WriteLine($"Error writing to log: {e}");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine($"Unable to open log file: {e}");
+            }
+        }
+
     }
 }
