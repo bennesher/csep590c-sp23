@@ -1,5 +1,4 @@
-﻿using DLL.Connection;
-using System.IO.Ports;
+﻿using DeviceInterface.Connection;
 
 namespace App
 {
@@ -7,18 +6,23 @@ namespace App
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("Hello, World!\n");
+            AsyncMain().Wait();
+        }
 
+        private static async Task AsyncMain()
+        {
             Console.WriteLine("Select Port:");
-            string[] ports = SerialPort.GetPortNames();
+            string[] ports = DeviceConnection.AvailablePorts;
             int i = 0;
             foreach (string port in ports)
             {
                 Console.WriteLine(" {0}: {1}", i++, port);
             }
+
+            DeviceConnection? connection = null;
             while (true)
             {
-                Console.Write("Choice (0-{0}): ", ports.Length-1);
+                Console.Write("Choice (0-{0}): ", ports.Length - 1);
                 var key = Console.ReadKey();
                 Console.WriteLine();
                 if (char.IsDigit(key.KeyChar))
@@ -26,30 +30,84 @@ namespace App
                     int portId = key.KeyChar - '0';
                     if (portId < ports.Length)
                     {
-                        TestPort(ports[portId]);
-                        return;
+                        connection = await ConnectToDevice(ports[portId]);
+                        if (connection != null)
+                            break;
                     }
                 }
                 Console.WriteLine("Sorry, invalid port");
             }
-        }
 
-        private static void TestPort(string port)
-        {
-            DeviceConnection connection = new(port);
-            if (connection.Open()) {
-                connection.ConnectionFailed += OnConnectionFailed;
-                Console.WriteLine("\nConnection established! Press any key to terminate.\n");
-                Console.ReadKey();
-                Console.WriteLine("\nTerminating the application...");
-                connection.Close();
+            while (true)
+            {
+                Console.WriteLine("s - Start streaming; p - stoP streaming; q - quit. Any other key will repeat this message.");
+                var key = Console.ReadKey();
+                switch (key.KeyChar)
+                {
+                    case 's':
+                    case 'S':
+                        var status = connection.StartStreaming();
+                        if (status != StreamingStatus.Streaming)
+                        {
+                            Console.WriteLine($"Can't start streaming: {status}");
+                        }
+                        break;
+
+                    case 'p':
+                    case 'P':
+                        connection.StopStreaming();
+                        break;
+
+                    case 'q':
+                    case 'Q':
+                        connection.Close();
+                        break;
+
+                    default: break;
+                }
+
+                if (!connection.IsConnected)
+                {
+                    Console.WriteLine("Connection is closed. Goodbye!");
+                    break;
+                }
             }
         }
 
-        private static void OnConnectionFailed(object? sender, EventArgs e)
+        private static async Task<DeviceConnection?> ConnectToDevice(string port)
         {
-            Console.WriteLine("Connection failed - Terminating...");
-            Environment.Exit(1);
+            DeviceConnection connection = new(port);
+            ConnectionStatus connectResult = await connection.Open();
+            if (connectResult == ConnectionStatus.Connected) {
+                connection.StatusChanged += OnConnectionStatusChanged;
+                connection.StreamingData += OnStreamingData;
+                return connection;
+            } 
+            else
+            {
+                Console.WriteLine($"Connection Failed: {connectResult}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        ///     Handler invoked when streaming data arrives
+        /// </summary>
+        /// <param name="sender">The connection</param>
+        /// <param name="e">The data</param>
+        private static void OnStreamingData(object? sender, StreamingDataEventArgs e)
+        {
+            Console.WriteLine($"- {e.Timestamp}: {e.Data}");
+        }
+
+        /// <summary>
+        ///     Handler invoked when the connection status (ie health) changes
+        /// </summary>
+        /// <param name="sender">The connection</param>
+        /// <param name="e">The new status</param>
+        private static void OnConnectionStatusChanged(object? sender, ConnectionEventArgs e)
+        {
+            Console.WriteLine($"## Connection is {e.Status}");
         }
     }
 }

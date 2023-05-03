@@ -1,6 +1,7 @@
-﻿using System.IO.Ports;
+﻿using System.Diagnostics;
+using System.IO.Ports;
 
-namespace DLL.Connection
+namespace DeviceInterface.Connection
 {
     /// <summary>
     ///     A continuously running task which handles incoming bytes
@@ -12,6 +13,8 @@ namespace DLL.Connection
         private readonly SerialPort _serialPort;
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _task;
+
+        private static readonly int FIXED_SIZE = 6;
 
         /// <summary>
         ///     Initialize the listener, and start the listening thread
@@ -48,11 +51,10 @@ namespace DLL.Connection
                 try
                 {
                     int i = 0;
-                    byte type = 0;
+                    PacketType type = 0;
                     byte packetId = 0;
                     byte size = 0;
-                    byte opCode = 0;
-                    byte[] data = null;
+                    byte[]? data = null;
                     int checksum = 0;
                     int limit = -1;      // We'll know the limit once we get the size
 
@@ -73,20 +75,20 @@ namespace DLL.Connection
                                 goto start_over;
 
                             case 0:
-                                if (0xAA != rcvd) goto case -1;
+                                if (Constants.PACKET_PREFIX[0] != rcvd) goto case -1;
                                 break;
 
                             case 1:
-                                if (0x01 != rcvd) goto case -1;
+                                if (Constants.PACKET_PREFIX[1] != rcvd) goto case -1;
                                 break;
 
                             case 2:
-                                if (0x02 != rcvd) goto case -1;
+                                if (Constants.PACKET_PREFIX[2] != rcvd) goto case -1;
                                 break;
 
                             case 3:
                                 if (rcvd > 2) goto case -1;
-                                type = (byte)rcvd;
+                                type = (PacketType)rcvd;
                                 break;
 
                             case 4:
@@ -96,22 +98,16 @@ namespace DLL.Connection
                             case 5:
                                 if (rcvd == 0) goto case -1;
                                 size = (byte)rcvd;
-                                limit = size + 6;
-                                if (size > 1)
-                                {
-                                    data = new byte[size - 1];
-                                }
-                                break;
-
-                            case 6:
-                                opCode = (byte)rcvd;
+                                limit = size + FIXED_SIZE;
+                                data = new byte[size];
                                 break;
 
                             default:
+                                Debug.Assert(data != null);
                                 if (i < limit)
                                 {
                                     // Additional payload bytes
-                                    data[i - 7] = (byte)rcvd;
+                                    data[i - FIXED_SIZE] = (byte)rcvd;
                                 }
                                 else if (i > limit)
                                 {
@@ -126,7 +122,7 @@ namespace DLL.Connection
                                     if (rcvd == checksumCheck)
                                     {
                                         // We got a full packet with a valid checksum!
-                                        _dispatcher.Handle(new Packet(packetId, opCode, data));
+                                        _dispatcher.Handle(new Packet(type, packetId, data));
                                     }
                                     else
                                     {
