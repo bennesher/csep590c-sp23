@@ -1,6 +1,7 @@
-﻿using System.Timers;
+﻿using System.Diagnostics;
+using System.Timers;
 
-namespace DLL.Connection
+namespace DeviceInterface.Connection
 {
     /// <summary>
     ///     Maintain a watchdog timer to keep the session alive, and restart the
@@ -9,12 +10,11 @@ namespace DLL.Connection
     internal class Watchdog
     {
         private const int FEEDING_INTERVAL = 4000;
+        private const int WATCHDOG_ATTEMPTS = 5;
 
         private readonly DeviceConnection _connection;
         private readonly CancellationTokenSource _cts = new();
-        private readonly Task _task;
         private readonly System.Timers.Timer _timer;
-
 
         internal Watchdog(DeviceConnection connection)
         {
@@ -27,44 +27,62 @@ namespace DLL.Connection
 
         internal void Cancel()
         {
+            try { _cts.Cancel(); }
+            catch (Exception ex) { 
+                Console.Error.WriteLine(ex.ToString());
+            }
+            _timer.Stop();
             _timer.Close();
         }
 
         /// <summary>
         ///     Keep the watchdog fed, and the connection alive
         /// </summary>
-        private void Feeder(object? sender, ElapsedEventArgs elapsed)
+        private async void Feeder(object? sender, ElapsedEventArgs elapsed)
         {
-            if (_connection.Write(0x02))
+            bool success = false;
+            int attempts = 0;
+            while (!success && attempts++ < WATCHDOG_ATTEMPTS)
             {
-                Console.WriteLine($"{elapsed.SignalTime} and all is well");
+                DeviceErrorCode? result = _connection.SendCommand(OpCode.WatchdogReset);
+                if (result == null)
+                {
+                    Debug.WriteLine($"{elapsed.SignalTime} and all is well");
+                    success = true;
+                }
+                else if (result == DeviceErrorCode.ERR_NOT_CONNECTED || result == DeviceErrorCode.ERR_NOT_OPEN)
+                {
+                    Console.Error.WriteLine("Can't feed if it's not connected!");
+                }
             }
-            else
-            {
+            
+            if (!success) { 
                 Console.Error.WriteLine("Lost communication with device; attempting to reconnect...");
-                Recover();
+                await Recover();
             }
         }
 
         /// <summary>
         ///     Attempt to reestablish the session
         /// </summary>
-        private void Recover()
+        private async Task Recover()
         {
+            bool restartOk = true;
             _timer.Stop();
             try
             {
-                if (!_connection.TryConnection())
-                {
-                    Console.Error.WriteLine("!!! Unable to restore connection to the device !!!");
-                    return;
-                }
+                await _connection.RestoreConnection(_cts.Token);
+                restartOk = _cts.TryReset();
             }
             catch (Exception e)
             {
                 Console.Error.WriteLine(e.ToString());
             }
-            _timer.Start();
+            if (restartOk)
+            {
+                // Restart if we weren't cancelled
+                _timer.Start();
+            }
         }
     }
 }
