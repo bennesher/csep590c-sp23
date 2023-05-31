@@ -18,7 +18,9 @@
         InitialConnection = 0x01,
         WatchdogReset     = 0x02,
         StartStreaming    = 0x03,
-        StopStreaming     = 0x04
+        StopStreaming     = 0x04,
+        StartTherapy      = 0x05,
+        StopTherapy       = 0x06
     }
 
     /// <summary>
@@ -34,6 +36,8 @@
         ERR_ALREADY_STREAMING = 5,
         ERR_ALREADY_STOP_STREAMING = 6,
         ERR_NOT_CONNECTED = 7,
+        ERR_ALREADY_DOING_THERAPY = 8,
+        ERR_ALREADY_STOP_THERAPY = 9,
         ERR_CANCELLED = 252,
         ERR_NOT_OPEN = 253,
         ERR_TIMEOUT_EXPIRED = 254,
@@ -51,6 +55,10 @@
         internal static readonly byte[] PACKET_PREFIX = { 0xAA, 0x01, 0x02 };
     }
 
+    /// <summary>
+    ///     Possible values returned by the <see cref="DeviceConnection.ConnectionStatusChanged"/> event,
+    ///     as well as the <see cref="DeviceConnection.Open"/> method.
+    /// </summary>
     public enum ConnectionStatus
     {
         /// <summary>

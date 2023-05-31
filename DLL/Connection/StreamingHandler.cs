@@ -1,7 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using Windows.Storage;
-using Windows.Storage.Streams;
 
 namespace DeviceInterface.Connection
 {
@@ -17,12 +16,14 @@ namespace DeviceInterface.Connection
         private const int RETRY_DELAY = 500;
         private const int CANCEL_RETRY_LIMIT = 3;
 
+        private const double DYNAMIC_RANGE = 3932.0;
+        private const double X_MIN = -1885.0032958984373;
+
         private readonly DeviceConnection _connection;
         private readonly CancellationTokenSource _ctsReset = new();
         private readonly CancellationTokenSource _ctsLog = new();
         private bool _initStreamInProgress = false;
-        private readonly BlockingCollection<StreamingDataEventArgs> _datapoints = new(new ConcurrentQueue<StreamingDataEventArgs>());
-        private Task _logWriter;
+        private readonly BlockingCollection<StreamingData> _datapoints = new(new ConcurrentQueue<StreamingData>());
 
         /// <summary>
         ///     Initialize this handler, which synchronously initializes the session.
@@ -36,10 +37,10 @@ namespace DeviceInterface.Connection
             connection.PacketDispatcher.Register(PacketType.StreamData, PacketHandler);
 
             // Register connection event listener
-            connection.StatusChanged += OnConnectionStatusChange;
+            connection.ConnectionStatusChanged += OnConnectionStatusChange;
 
             // Set up the log file
-            _logWriter = Task.Run(async () => await LogFileWriter(connection.LogFileName));
+            _ = Task.Run(async () => await LogFileWriter(connection.LogFileName));
 
             // Initialize the stream
             InitStream().Wait();
@@ -60,7 +61,7 @@ namespace DeviceInterface.Connection
             while (!success && !cancellationToken.IsCancellationRequested)
             {
                 DeviceErrorCode? cmdResult = _connection.SendCommand(OpCode.StartStreaming);
-                if (cmdResult == null || cmdResult == DeviceErrorCode.ERR_ALREADY_STREAMING)
+                if (cmdResult is null or DeviceErrorCode.ERR_ALREADY_STREAMING)
                 {
                     // Either this request was successfully acknowledged, or the device is already
                     // in streaming mode. We're good!
@@ -100,7 +101,7 @@ namespace DeviceInterface.Connection
             int retryCount = 0;
             while (retryCount++ < CANCEL_RETRY_LIMIT)
             {
-                DeviceErrorCode? cmdResult = _connection.SendCommand(OpCode.StopStreaming);
+                var cmdResult = _connection.SendCommand(OpCode.StopStreaming);
                 if (cmdResult != DeviceErrorCode.ERR_BAD_CHECKSUM && cmdResult != DeviceErrorCode.ERR_TIMEOUT_EXPIRED) {
                     break;
                 }
@@ -110,7 +111,7 @@ namespace DeviceInterface.Connection
 
             // Deregister listeners
             _connection.PacketDispatcher.Unregister(PacketType.StreamData, PacketHandler);
-            _connection.StatusChanged -= OnConnectionStatusChange;
+            _connection.ConnectionStatusChanged -= OnConnectionStatusChange;
 
             // And cancel the log writer
             try { _ctsLog.Cancel(); }
@@ -127,24 +128,24 @@ namespace DeviceInterface.Connection
         /// <returns><c>true</c> because the packet will always be handled</returns>
         private bool PacketHandler(Packet packet)
         {
-            // Make sure it's actually a data packet
-            if (packet.type == PacketType.StreamData)
-            {
-                // Decode the packet
-                using MemoryStream dataStream = new(packet.data);
-                using BinaryReader reader = new(dataStream);
+            // Make sure it's actually a data packet (we shouldn't be getting called if it isn't)
+            if (packet.type != PacketType.StreamData) return true;
 
-                uint timestamp = reader.ReadUInt32();
-                ushort reading = reader.ReadUInt16();
+            // Decode the packet
+            using MemoryStream dataStream = new(packet.data);
+            using BinaryReader reader = new(dataStream);
 
-                StreamingDataEventArgs evt = new(timestamp, reading);
+            var timestamp = reader.ReadUInt32();
+            var reading = reader.ReadUInt16();
+            var mv = reading / 65536.0 * DYNAMIC_RANGE + X_MIN;
 
-                // Fire the event
-                _connection.RaiseStreamingEvent(evt);
+            StreamingData evt = new(timestamp, mv);
 
-                // And log the packet
-                _datapoints.Add(evt);
-            }
+            // Fire the event
+            _connection.RaiseStreamingEvent(evt);
+
+            // And log the packet
+            _datapoints.Add(evt);
 
             // Regardless, we handled it
             return true;
@@ -157,6 +158,7 @@ namespace DeviceInterface.Connection
         /// <param name="evtArgs">Information about the change</param>
         private void OnConnectionStatusChange(object? sender, ConnectionEventArgs evtArgs)
         {
+            // ReSharper disable once SwitchStatementMissingSomeEnumCasesNoDefault
             switch (evtArgs.Status)
             {
                 // We've (re-)connected - (re-)start streaming
@@ -181,19 +183,19 @@ namespace DeviceInterface.Connection
         /// <param name="fileName">The base filename to use</param>
         private async Task LogFileWriter(string fileName)
         {
-            CancellationToken cToken = _ctsLog.Token;
+            var cToken = _ctsLog.Token;
             try
             {
                 var logFile = await ApplicationData.Current.LocalFolder.CreateFileAsync(fileName, CreationCollisionOption.GenerateUniqueName);
                 Console.WriteLine($"Logging to {logFile.Path}");
-                using StreamWriter logStream = new(logFile.Path);
-                logStream.WriteLine("'Timestamp', 'Value'");
+                await using StreamWriter logStream = new(logFile.Path);
+                await logStream.WriteLineAsync("'Timestamp','Value','InSeizure','TherapyState'");
                 while (!cToken.IsCancellationRequested)
                 {
                     try
                     {
                         var data = _datapoints.Take(cToken);
-                        logStream.WriteLine($"{data.Timestamp}, {data.Data}");
+                        await logStream.WriteLineAsync($"{data.Timestamp},{data.Data},{_connection.IsInSeizure},{_connection.IsTherapyNeeded}");
                     }
                     catch (OperationCanceledException) 
                     {

@@ -26,7 +26,7 @@ namespace DeviceInterface.Connection
             _dispatcher = dispatcher;
             _serialPort = serialPort;
 
-            _task = Task.Run(() => Listen(_cts.Token));
+            _task = Listen(_cts.Token);
         }
 
         /// <summary>
@@ -35,14 +35,22 @@ namespace DeviceInterface.Connection
         internal void Cancel()
         {
             _cts.Cancel();
-            _task.Wait(TimeSpan.FromSeconds(1));
+            if (_task.Wait(TimeSpan.FromSeconds(1)))
+            {
+                _task.Dispose();
+            }
+            else
+            {
+                Debug.Print("Failed to interrupt listener thread");
+                _task.ContinueWith(task => Debug.Print("Listener finally quit"));
+            }
         }
 
         /// <summary>
         ///     The main listener task
         /// </summary>
         /// <param name="cancellationToken">Allows for graceful shutdown</param>
-        private void Listen(CancellationToken cancellationToken)
+        private async Task Listen(CancellationToken cancellationToken)
         {
             start_over:
             while (!cancellationToken.IsCancellationRequested)
@@ -51,6 +59,7 @@ namespace DeviceInterface.Connection
                 try
                 {
                     int i = 0;
+                    byte[] buffer = new byte[1];
                     PacketType type = 0;
                     byte packetId = 0;
                     byte size = 0;
@@ -58,46 +67,56 @@ namespace DeviceInterface.Connection
                     int checksum = 0;
                     int limit = -1;      // We'll know the limit once we get the size
 
-                    while (true)
+                    while (!cancellationToken.IsCancellationRequested)
                     {
-                        int rcvd = _serialPort.ReadByte();
-                        if (rcvd == -1)
+
+                        var rcvd = await _serialPort.BaseStream.ReadAsync(buffer, 0, 1, cancellationToken);
+                        if (rcvd == 0)
                         {
                             Console.Error.WriteLine("Unexpected End of Stream received!");
                             return;
                         }
 
                         // Handle the received byte according to its place in the packet
+                        var theByte = buffer[0];
+
                         switch (i)
                         {
                             case -1:
-                                Console.Error.WriteLine("Unexpected byte received at position {0}: {1}", i, rcvd);
-                                goto start_over;
+                                if (Constants.PACKET_PREFIX[0] != theByte)
+                                {
+                                    if (theByte != 0)
+                                        Console.Error.WriteLine("Unexpected byte received at position {0}: {1}", i, theByte);
+                                    goto start_over;
+                                }
+                                // If the unexpected byte could be a start byte, treat it as such
+                                i = 0;
+                                break;
 
                             case 0:
-                                if (Constants.PACKET_PREFIX[0] != rcvd) goto case -1;
+                                if (Constants.PACKET_PREFIX[0] != theByte) goto case -1;
                                 break;
 
                             case 1:
-                                if (Constants.PACKET_PREFIX[1] != rcvd) goto case -1;
+                                if (Constants.PACKET_PREFIX[1] != theByte) goto case -1;
                                 break;
 
                             case 2:
-                                if (Constants.PACKET_PREFIX[2] != rcvd) goto case -1;
+                                if (Constants.PACKET_PREFIX[2] != theByte) goto case -1;
                                 break;
 
                             case 3:
-                                if (rcvd > 2) goto case -1;
-                                type = (PacketType)rcvd;
+                                if (theByte > 2) goto case -1;
+                                type = (PacketType)theByte;
                                 break;
 
                             case 4:
-                                packetId = (byte)rcvd;
+                                packetId = theByte;
                                 break;
 
                             case 5:
-                                if (rcvd == 0) goto case -1;
-                                size = (byte)rcvd;
+                                if (theByte == 0) goto case -1;
+                                size = (byte)theByte;
                                 limit = size + FIXED_SIZE;
                                 data = new byte[size];
                                 break;
@@ -107,7 +126,7 @@ namespace DeviceInterface.Connection
                                 if (i < limit)
                                 {
                                     // Additional payload bytes
-                                    data[i - FIXED_SIZE] = (byte)rcvd;
+                                    data[i - FIXED_SIZE] = (byte)theByte;
                                 }
                                 else if (i > limit)
                                 {
@@ -119,36 +138,42 @@ namespace DeviceInterface.Connection
                                 {
                                     // We got the checksum byte; does it match?
                                     var checksumCheck = (byte)(checksum % (Byte.MaxValue + 1));
-                                    if (rcvd == checksumCheck)
+                                    if (theByte == checksumCheck)
                                     {
                                         // We got a full packet with a valid checksum!
                                         _dispatcher.Handle(new Packet(type, packetId, data));
                                     }
                                     else
                                     {
-                                        Console.Error.WriteLine("Invalid checksum! Computed: {0}, Received: {1}", checksumCheck, rcvd);
+                                        Console.Error.WriteLine("Invalid checksum! Computed: {0}, Received: {1}", checksumCheck, theByte);
                                     }
                                     goto start_over;
                                 }
                                 break;
                         }
-                        checksum += rcvd;
+                        checksum += theByte;
                         i += 1;
                         inPacket = true;
                     }
                 }
-                catch (TimeoutException)
+                catch (OperationCanceledException)
                 {
-                    if (inPacket)
-                    {
-                        // We got only part of a packet; that's a problem
-                        Console.Error.WriteLine("Incomplete packet received before read timeout");
-                    }
-                    // otherwise, it could just be silence
+                    return;
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine(ex.ToString());
+                    if (ex is TimeoutException || ex.Message is not null && ex.Message.Contains("timeout"))
+                    {
+                        if (inPacket)
+                        {
+                            // We got only part of a packet; that's a problem
+                            Console.Error.WriteLine("Incomplete packet received before read timeout");
+                        }
+                        // otherwise, it could just be silence
+                    } else
+                    {
+                        Console.Error.WriteLine(ex.ToString());
+                    }
                 }
             }
         }
