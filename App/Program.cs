@@ -6,10 +6,12 @@ namespace App
     {
         static void Main(string[] args)
         {
-            AsyncMain().Wait();
+            new Program().AsyncMain().Wait();
         }
 
-        private static async Task AsyncMain()
+        private DeviceConnection? _connection;
+
+        private async Task AsyncMain()
         {
             Console.WriteLine("Select Port:");
             string[] ports = DeviceConnection.AvailablePorts;
@@ -19,7 +21,7 @@ namespace App
                 Console.WriteLine(" {0}: {1}", i++, port);
             }
 
-            DeviceConnection? connection = null;
+            _connection = null;
             while (true)
             {
                 Console.Write("Choice (0-{0}): ", ports.Length - 1);
@@ -30,8 +32,8 @@ namespace App
                     int portId = key.KeyChar - '0';
                     if (portId < ports.Length)
                     {
-                        connection = await ConnectToDevice(ports[portId]);
-                        if (connection != null)
+                        _connection = await ConnectToDevice(ports[portId]);
+                        if (_connection != null)
                             break;
                     }
                 }
@@ -40,54 +42,54 @@ namespace App
 
             while (true)
             {
-                Console.WriteLine("S - Start/Stop streaming; Q - Quit. Any other key will repeat this message.");
+                Console.WriteLine("\nS - Start/Stop streaming; Q - Quit. Any other key will repeat this message.");
                 var key = Console.ReadKey(true);
                 switch (key.KeyChar)
                 {
                     case 's':
                     case 'S':
-                        if (connection.IsStreaming)
+                        if (_connection.IsStreaming)
                         {
-                            connection.StopStreaming();
+                            _connection.StopStreaming();
                         }
                         else
                         {
-                            var status = connection.StartStreaming();
+                            var status = _connection.StartStreaming();
                             if (status != StreamingStatus.Streaming)
                             {
-                                Console.WriteLine($"Can't start streaming: {status}");
+                                Console.WriteLine($"\nCan't start streaming: {status}");
                             }
                         }
                         break;
 
                     case 'q':
                     case 'Q':
-                        connection.Close();
+                        _connection.Close();
                         break;
 
                     default: break;
                 }
 
-                if (!connection.IsConnected)
+                if (!_connection.IsConnected)
                 {
-                    Console.WriteLine("Connection is closed. Goodbye!");
+                    Console.WriteLine("\nConnection is closed. Goodbye!");
                     break;
                 }
             }
         }
 
-        private static async Task<DeviceConnection?> ConnectToDevice(string port)
+        private async Task<DeviceConnection?> ConnectToDevice(string port)
         {
             DeviceConnection connection = new(port);
             ConnectionStatus connectResult = await connection.Open();
             if (connectResult == ConnectionStatus.Connected) {
-                connection.StatusChanged += OnConnectionStatusChanged;
+                connection.ConnectionStatusChanged += OnConnectionStatusChanged;
                 connection.StreamingData += OnStreamingData;
                 return connection;
             } 
             else
             {
-                Console.WriteLine($"Connection Failed: {connectResult}");
+                Console.WriteLine($"\nConnection Failed: {connectResult}");
             }
             return null;
         }
@@ -97,9 +99,9 @@ namespace App
         /// </summary>
         /// <param name="sender">The connection</param>
         /// <param name="e">The data</param>
-        private static void OnStreamingData(object? sender, StreamingDataEventArgs e)
+        private void OnStreamingData(object? sender, StreamingData e)
         {
-            Console.WriteLine($"- {e.Timestamp}: {e.Data}");
+            Console.Write($"\r  {e.Timestamp, 6}: {e.Data, 10:F2}uv; Seizure: {_connection.IsInSeizure,5}, Therapy: Needed? {_connection.IsTherapyNeeded,5} Active? {_connection.IsTherapyActive,5} ");
         }
 
         /// <summary>
@@ -109,7 +111,7 @@ namespace App
         /// <param name="e">The new status</param>
         private static void OnConnectionStatusChanged(object? sender, ConnectionEventArgs e)
         {
-            Console.WriteLine($"## Connection is {e.Status}");
+            Console.WriteLine($"\n## Connection is {e.Status}");
         }
     }
 }

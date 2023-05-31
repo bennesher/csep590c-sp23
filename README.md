@@ -9,3 +9,8 @@ Establish and maintain a connection
 
 * Start/Stop streaming of neural data
 * Log to file and publish as events
+
+## Project 4
+
+* Continuous evaluation of signal against a model
+* Delivery of therapy based on signal

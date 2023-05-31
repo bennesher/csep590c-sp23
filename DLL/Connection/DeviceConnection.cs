@@ -8,7 +8,7 @@ namespace DeviceInterface.Connection
     /// </summary>
     public class DeviceConnection
     {
-        private const int WRITE_TIMEOUT = 500;
+        private const int WRITE_TIMEOUT = 200;
         private const int READ_TIMEOUT = 500;
         private const int CONNECTION_ATTEMPTS = 5;
         private const int BAD_PORT_RETRY_DELAY = 3000;
@@ -20,17 +20,14 @@ namespace DeviceInterface.Connection
         private PacketDispatcher? _packetDispatcher;
         private PortListener? _portListener;
         private StreamingHandler? _streamingHandler;
+        private TherapyMonitor? _therapyMonitor;
         private uint _packetCounter = 0;
-        private bool _connected = false;
-        private bool _streaming = false;
+        private bool _therapyEnabled = true;
 
         /// <summary>
         ///     Provides the list of valid values for the constructor
         /// </summary>
-        public static string[] AvailablePorts
-        {
-            get => SerialPort.GetPortNames();
-        }
+        public static string[] AvailablePorts => SerialPort.GetPortNames();
 
         /// <summary>
         ///     The file to use for logging streaming data; may be set when connection is constructed
@@ -40,17 +37,44 @@ namespace DeviceInterface.Connection
         /// <summary>
         ///     Once opened, a connection will remain connected until it is closed.
         /// </summary>
-        public bool IsConnected
-        {
-            get => _connected;
-        }
+        public bool IsConnected { get; private set; } = false;
 
         /// <summary>
         ///     Has streaming been enabled?
         /// </summary>
-        public bool IsStreaming
+        public bool IsStreaming { get; private set; } = false;
+
+        /// <summary>
+        ///     Is the "patient" currently experiencing a seizure? This is only valid
+        ///     while streaming is enabled.
+        /// </summary>
+        public bool? IsInSeizure => _therapyMonitor?.IsInSeizure;
+
+        /// <summary>
+        ///     Should therapy be applied? This is only valid while streaming is enabled.
+        /// </summary>
+        public bool? IsTherapyNeeded => _therapyMonitor?.IsTherapyNeeded;
+
+        /// <summary>
+        ///     Is therapy actively being applied? This is only valid while streaming is enabled.
+        /// </summary>
+        public bool? IsTherapyActive => _therapyMonitor?.IsTherapyActive;
+
+        /// <summary>
+        ///     Enable or disable delivery of automatic therapy
+        /// </summary>
+        public bool TherapyEnabled
         {
-            get => _streaming;
+            get => _therapyEnabled;
+            set
+            {
+                var change = _therapyEnabled != value;
+                _therapyEnabled = value;
+                if (change)
+                {
+                    TherapyEnabledChanged?.Invoke(this, value);
+                }
+            }
         }
 
         /// <summary>
@@ -84,20 +108,31 @@ namespace DeviceInterface.Connection
         ///     This allows the listener to attempt to establish a new connection,
         ///     escalate the alert, or simply fail gracefully.
         /// </summary>
-        public event EventHandler<ConnectionEventArgs>? StatusChanged;
+        public event EventHandler<ConnectionEventArgs>? ConnectionStatusChanged;
 
         /// <summary>
         ///     Event fired for each data packet received from the device
         /// </summary>
-        public event EventHandler<StreamingDataEventArgs>? StreamingData;
+        public event EventHandler<StreamingData>? StreamingData;
 
         /// <summary>
-        ///     Opens the port and establishes a communication sesion
+        ///     Event raised to report diagnostic evaluations. Contains details
+        ///     about the current status derivation.
+        /// </summary>
+        public event EventHandler<SeizureStatusClassification>? SeizureStatus;
+
+        /// <summary>
+        ///     
+        /// </summary>
+        internal event EventHandler<bool>? TherapyEnabledChanged;
+
+        /// <summary>
+        ///     Opens the port and establishes a communication session
         /// </summary>
         public async Task<ConnectionStatus> Open()
         {
             // Don't reconnect if we're already connected
-            if (_connected)
+            if (IsConnected)
             {
                 return ConnectionStatus.AlreadyConnected;
             }
@@ -121,7 +156,7 @@ namespace DeviceInterface.Connection
             {
                 // Now that we have our connection, keep it alive
                 _watchdog = new Watchdog(this);
-                _connected = true;
+                IsConnected = true;
                 return ConnectionStatus.Connected;
             } else
             {
@@ -173,18 +208,19 @@ namespace DeviceInterface.Connection
         /// </returns>
         public StreamingStatus StartStreaming()
         {
-            if (!_connected)
+            if (!IsConnected)
             {
                 return StreamingStatus.ConnectionNotOpen;
             }
 
-            if (_streaming)
+            if (IsStreaming)
             {
                 return StreamingStatus.AlreadyStreaming;
             }
 
             _streamingHandler = new(this);
-            _streaming = true;
+            _therapyMonitor = new(this);
+            IsStreaming = true;
             return StreamingStatus.Streaming;
         }
 
@@ -193,11 +229,13 @@ namespace DeviceInterface.Connection
         /// </summary>
         public void StopStreaming()
         {
-            if (_streaming)
+            if (IsStreaming)
             {
-                _streaming = false;
+                IsStreaming = false;
                 _streamingHandler?.Cancel();
                 _streamingHandler = null;
+                _therapyMonitor?.Dispose();
+                _therapyMonitor = null;
             }
         }
 
@@ -242,7 +280,8 @@ namespace DeviceInterface.Connection
             }
             else
             {
-                Console.Error.WriteLine("Failed to open connection to device [errorCode={0}]", result);
+                Debug.WriteLine("Failed to open connection to device [errorCode={0}]", result);
+                Console.Write(".");
                 return result;
             }
         }
@@ -284,29 +323,11 @@ namespace DeviceInterface.Connection
         }
 
         /// <summary>
-        ///     Asynchronosly notify listeners of a change of connection status
-        /// </summary>
-        /// <param name="status">The new status</param>
-        private void RaiseConnectionEvent(ConnectionStatus status)
-        {
-            Task.Run(() => StatusChanged?.Invoke(this, new ConnectionEventArgs(status)));
-        }
-
-        /// <summary>
-        ///     Asynchronosly notify listeners of incoming data
-        /// </summary>
-        /// <param name="args">The received data</param>
-        internal void RaiseStreamingEvent(StreamingDataEventArgs args)
-        {
-            Task.Run(() => StreamingData?.Invoke(this, args));
-        }
-
-        /// <summary>
         ///     Terminates the session, and releases the port and supporting resources
         /// </summary>
         public void Close()
         {
-            if (_connected)
+            if (IsConnected)
             {
                 StopStreaming();
                 _watchdog?.Cancel();
@@ -314,7 +335,7 @@ namespace DeviceInterface.Connection
                 _packetDispatcher?.Cancel();
                 _packetDispatcher = null;
                 PortCleanup();
-                _connected = false;
+                IsConnected = false;
             }
         }
 
@@ -329,7 +350,7 @@ namespace DeviceInterface.Connection
         /// </returns>
         internal DeviceErrorCode? SendCommand(OpCode opCode, byte[]? data = null)
         {
-            if (_serialPort == null || _packetDispatcher == null)
+            if (_serialPort is null || _packetDispatcher is null)
             {
                 return DeviceErrorCode.ERR_NOT_CONNECTED;
             }
@@ -393,7 +414,7 @@ namespace DeviceInterface.Connection
                 Debug.Assert(errorCode != null);
 
                 // Clean up if no reply received
-                if (_connected)
+                if (IsConnected)
                 {
                     _packetDispatcher.Unregister(PacketType.Command, listener);
                 }
@@ -435,6 +456,33 @@ namespace DeviceInterface.Connection
             packet[packetSize - 1] = (byte)(checksum % (Byte.MaxValue + 1));
 
             return packet;
+        }
+
+        /// <summary>
+        ///     Asynchronously notify listeners of a change of connection status
+        /// </summary>
+        /// <param name="status">The new status</param>
+        private void RaiseConnectionEvent(ConnectionStatus status)
+        {
+            Task.Run(() => ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs(status)));
+        }
+
+        /// <summary>
+        ///     Asynchronously notify listeners of incoming data
+        /// </summary>
+        /// <param name="args">The received data</param>
+        internal void RaiseStreamingEvent(StreamingData args)
+        {
+            Task.Run(() => StreamingData?.Invoke(this, args));
+        }
+
+        /// <summary>
+        ///     Asynchronously notify listeners of an evaluation of the patient's status
+        /// </summary>
+        /// <param name="evaluation">The data to share</param>
+        internal void RaiseSeizureStatusEvent(SeizureStatusClassification evaluation)
+        {
+            Task.Run(() => SeizureStatus?.Invoke(this, evaluation));
         }
     }
 }

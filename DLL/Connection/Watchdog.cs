@@ -9,13 +9,18 @@ namespace DeviceInterface.Connection
     /// </summary>
     internal class Watchdog
     {
-        private const int FEEDING_INTERVAL = 4000;
-        private const int WATCHDOG_ATTEMPTS = 5;
+        private const int FEEDING_INTERVAL = 3000;
+        private const int WATCHDOG_ATTEMPTS = 3;
 
         private readonly DeviceConnection _connection;
         private readonly CancellationTokenSource _cts = new();
         private readonly System.Timers.Timer _timer;
 
+        /// <summary>
+        ///     Create the Watchdog monitor for the Connection. The watchdog starts immediately,
+        ///     and runs (on a separate timer) until <see cref="Cancel"/> is called.
+        /// </summary>
+        /// <param name="connection">The connection to keep alive</param>
         internal Watchdog(DeviceConnection connection)
         {
             _connection = connection;
@@ -25,6 +30,10 @@ namespace DeviceInterface.Connection
             _timer.Start();
         }
 
+        /// <summary>
+        ///     Cancel this Watchdog. Once this method is called, this instance cannot be restarted --
+        ///     a new instance will be needed.
+        /// </summary>
         internal void Cancel()
         {
             try { _cts.Cancel(); }
@@ -52,7 +61,8 @@ namespace DeviceInterface.Connection
                 }
                 else if (result == DeviceErrorCode.ERR_NOT_CONNECTED || result == DeviceErrorCode.ERR_NOT_OPEN)
                 {
-                    Console.Error.WriteLine("Can't feed if it's not connected!");
+                    Debug.WriteLine("Can't feed if it's not connected!");
+                    break;
                 }
             }
             

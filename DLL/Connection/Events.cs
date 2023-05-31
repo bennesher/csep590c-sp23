@@ -1,16 +1,33 @@
 ﻿namespace DeviceInterface.Connection
 {
     /// <summary>
+    ///     Used for reporting the current classification state
+    /// </summary>
+    public class SeizureStatusClassification : EventArgs
+    {
+        public readonly bool Classification;
+        public readonly float Confidence;
+        public readonly double[] SpectralPowerDensity;
+
+        internal SeizureStatusClassification(bool classification, float confidence, double[] spectralPowerDensity)
+        {
+            Classification = classification;
+            Confidence = confidence;
+            SpectralPowerDensity = spectralPowerDensity;
+        }
+    }
+
+    /// <summary>
     ///     Notification of a change of the status of the connection
     /// </summary>
-    public class ConnectionEventArgs: EventArgs
+    public class ConnectionEventArgs : EventArgs
     {
         /// <summary>
         ///     The new status of the connection
         /// </summary>
         public readonly ConnectionStatus Status;
 
-        public ConnectionEventArgs(ConnectionStatus status)
+        internal ConnectionEventArgs(ConnectionStatus status)
         {
             Status = status;
         }
@@ -19,7 +36,7 @@
     /// <summary>
     ///     A streaming datapoint
     /// </summary>
-    public class StreamingDataEventArgs : EventArgs
+    public class StreamingData : EventArgs
     {
         /// <summary>
         ///     Event timestamp in device time, in milliseconds
@@ -27,15 +44,14 @@
         public readonly uint Timestamp;
 
         /// <summary>
-        ///     Reading at specified time, in microvolts
+        ///     Reading at specified time, in millivolts
         /// </summary>
-        public readonly ushort Data;
+        public readonly double Data;
 
-        public StreamingDataEventArgs(uint timestamp, ushort data)
+        internal StreamingData(uint timestamp, double data)
         {
             Timestamp = timestamp;
             Data = data;
         }
     }
-
 }
